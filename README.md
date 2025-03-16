@@ -13,4 +13,5 @@ Supported OS:
 4. Add make executable from msys/usr/bin folder to your system path varitable.
 5. Clone this repo with git clone https://github.com/DemaxGames/DMXEngine or download it from this github.
 6. Open repo folder with cmd and type make build
-7. DMXEngine executable will be in repo folder, open it and you'll see window with rotating triangle
+7. DMXEngine executable will be in repo folder, open it and you'll see window with rotating triangle.
+![ezgif-462cdd93c381ee](https://github.com/user-attachments/assets/ae6d14ce-3f17-46f9-971d-68a200361ef3)
