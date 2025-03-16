@@ -2,6 +2,6 @@
 /.vscode
 .gitattributes
 .git
-*.exe
+DMXEngine.exe
 *.tags
 *.spv
