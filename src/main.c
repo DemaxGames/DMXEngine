@@ -13,7 +13,7 @@
 
 #define DEG_TO_RAD(deg) (deg * 0.0174533)
 
-char* appName = "GTNH 2.0";
+char* appName = "testApp";
 char* engineName = "DMXEngine";
 uint32_t MAX_FRAMES_IN_FLIGHT = 1;
 
@@ -104,7 +104,7 @@ int main(int argc, char** argv){
     appInfo.pApplicationName = appName;
     appInfo.applicationVersion = VK_MAKE_VERSION(0, 0, 1);
     appInfo.pEngineName = engineName;
-    appInfo.engineVersion = VK_MAKE_VERSION(0, 0, 1);
+    appInfo.engineVersion = VK_MAKE_VERSION(0, 0, 2);
     appInfo.apiVersion = VK_API_VERSION_1_0;
 
     /***********Creating Vulkan Instance Info***********/
@@ -675,7 +675,7 @@ int main(int argc, char** argv){
     viewport.width = (float)swapchainInfo.imageExtent.width;
     viewport.height = (float)swapchainInfo.imageExtent.height;
     viewport.minDepth = 0.0f;
-    viewport.maxDepth = 2.0f;
+    viewport.maxDepth = 1.0f;
     
     VkRect2D scissor;
     VkOffset2D scissorOffset;
@@ -841,6 +841,7 @@ int main(int argc, char** argv){
     renderArea.extent = swapchainInfo.imageExtent;
     VkClearValue clearValue = {0.2f, 0.3f, 0.5f, 0.0f};
 
+
     for(uint32_t i = 0; i < swapImageCount; i++){
         cmdBufferBeginInfos[i].sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         cmdBufferBeginInfos[i].pNext = NULL;
@@ -876,7 +877,7 @@ int main(int argc, char** argv){
 
     /****Creating Semaphore****/
 
-    uint32_t maxFrames = 2;
+    uint32_t maxFrames = 1;
     VkSemaphore semaphoreImgAvl[maxFrames];
     VkSemaphore semaphoreRendFin[maxFrames];
     
@@ -929,9 +930,13 @@ int main(int argc, char** argv){
     presentInfo.pResults = NULL;
 
     
+    uint32_t fpsCounter = 0;
 
     uint32_t frame = 0;
     float time = DEG_TO_RAD(-360);
+    clock_t prevTime;
+    prevTime = clock();
+    int framesToShowFps = 1300;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -956,7 +961,7 @@ int main(int argc, char** argv){
         sempSig[0] = semaphoreRendFin[frame];
         
         subInfo.signalSemaphoreCount = 1;
-        subInfo.pSignalSemaphores = &(sempSig[0]);
+        subInfo.pSignalSemaphores = sempSig;
 
         vkResetFences(device, 1, &(fence[frame]));
         vkQueueSubmit(qGraph, 1, &subInfo, fence[frame]);
@@ -973,6 +978,16 @@ int main(int argc, char** argv){
         
         frame = (frame + 1) % maxFrames;
         time = time + 0.005;
+        fpsCounter++;
+        if(fpsCounter > framesToShowFps){
+            float fps;
+            clock_t newTime = clock();
+            fps = framesToShowFps / (((float)(newTime) - prevTime) / CLOCKS_PER_SEC);
+            printf("\r              ");
+            printf("\rfps: %f", fps);
+            prevTime = newTime;
+            fpsCounter = 0;
+        }
     }
 
     vkDeviceWaitIdle(device);

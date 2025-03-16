@@ -1,4 +1,4 @@
-TARGET = DEXMEngine
+TARGET = DMXEngine
 PREF_SRC = ./src/
 CSRC := $(wildcard $(PREF_SRC)*.c)
 COBJ := $(patsubst %.c, %.o, $(CSRC))
