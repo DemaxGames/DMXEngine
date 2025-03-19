@@ -1,6 +1,7 @@
 TARGET = DMXEngine
 PREF_SRC = ./src/
 CSRC := $(wildcard $(PREF_SRC)*.c)
+CSRC := $(CSRC) $(wildcard $(PREF_SRC)mathc/*.c)
 COBJ := $(patsubst %.c, %.o, $(CSRC))
 COBJ := $(subst src,build, $(COBJ))
 LIB := $(LIB)

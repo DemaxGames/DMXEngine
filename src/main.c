@@ -78,6 +78,41 @@ void createDescriptorSets(VkDevice device, VkDescriptorSetLayout* layout, VkDesc
     vkAllocateDescriptorSets(device, &allocInfo, descriptorSets);
 }
 
+VkImageView createImageView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
+    VkImageViewCreateInfo viewInfo;
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.pNext = NULL;
+    viewInfo.flags = 0;
+    viewInfo.image = image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = format;
+    viewInfo.subresourceRange.aspectMask = aspectFlags;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    VkImageView imageView;
+    vkCreateImageView(device, &viewInfo, NULL, &imageView);
+
+    return imageView;
+}
+
+VkFormat findSupportedFormat(VkPhysicalDevice physDevice, VkFormat* candidates, uint32_t candidatesCount, VkImageTiling tiling, VkFormatFeatureFlags features){
+    for (uint32_t i = 0; i < candidatesCount; i++) {
+        VkFormat format = candidates[i];
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(physDevice, format, &props);
+
+        if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+            return format;
+        } else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+            return format;
+        }
+    }
+
+}
+
 int main(int argc, char** argv){
 
     /***********Initializing GLFW Window***********/
@@ -135,6 +170,7 @@ int main(int argc, char** argv){
     /***********Setting Up Physical Device***********/
 
     printf("Creating Device\n");
+
 
     uint32_t physDeviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &physDeviceCount, NULL);
@@ -202,6 +238,12 @@ int main(int argc, char** argv){
     }
 
     VkPhysicalDevice* physDevice = &physDevices[physDeviceBestIndex];
+    VkFormat depthFormat;
+    VkFormat depthFormats[3] = {VK_FORMAT_D32_SFLOAT,
+                                VK_FORMAT_D32_SFLOAT_S8_UINT,
+                                VK_FORMAT_D24_UNORM_S8_UINT};
+    depthFormat = findSupportedFormat(*physDevice, depthFormats, 3, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+
     uint32_t qfPropertiesCount = 0; // qf stands for queue family
     vkGetPhysicalDeviceQueueFamilyProperties(*physDevice, &qfPropertiesCount, NULL);
     VkQueueFamilyProperties qfProperties[qfPropertiesCount];
@@ -415,7 +457,59 @@ int main(int argc, char** argv){
         printf("Image view %d created\n", i);
     }
 
+    /***********Creating Depth Images***********/
+    
+    VkImage depthImages[swapImageCount];
+    VkDeviceMemory depthImagesMemory[swapImageCount];
+    VkImageView depthImageViews[swapImageCount];
+    VkSampler depthSamplers[swapImageCount];
+
+    for(uint32_t i = 0; i < swapImageCount; i++){
+        VkImageUsageFlagBits usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        VkMemoryPropertyFlagBits propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        VkExtent3D extention;
+        extention.width = width;
+        extention.height = height;
+        extention.depth = 1;
+        VkImageCreateInfo imageInfo;
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.pNext = NULL;
+        imageInfo.flags = 0;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = depthFormat;
+        imageInfo.extent = extention;
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage = usage;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        imageInfo.queueFamilyIndexCount = 0;
+        imageInfo.pQueueFamilyIndices = NULL;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        vkCreateImage(device, &imageInfo, NULL, &depthImages[i]);
+
+        VkMemoryRequirements memReqs;
+        vkGetImageMemoryRequirements(device, depthImages[i], &memReqs);
+        uint32_t memTypeIndex = FindMemType(*physDevice, memReqs.memoryTypeBits, propertyFlags);
+
+        VkMemoryAllocateInfo memAllocInfo;
+        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memAllocInfo.pNext = NULL;
+        memAllocInfo.allocationSize = memReqs.size;
+        memAllocInfo.memoryTypeIndex = memTypeIndex;
+
+        vkAllocateMemory(device, &memAllocInfo, NULL, &depthImagesMemory[i]);
+        vkBindImageMemory(device, depthImages[i], depthImagesMemory[i], 0);
+
+        depthImageViews[i] = createImageView(device, depthImages[i], depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+        
+    }
+
     /***********Creating Render Pass***********/
+
+    VkAttachmentDescription attachDescriptions[2];
 
     VkAttachmentDescription attachDescription;
     attachDescription.flags = 0;
@@ -427,10 +521,26 @@ int main(int argc, char** argv){
     attachDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     attachDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     attachDescription.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    attachDescriptions[0] = attachDescription;
 
     VkAttachmentReference attachReference;
     attachReference.attachment = 0;
     attachReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription depthAttachment;
+    depthAttachment.format = depthFormat;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    attachDescriptions[1] = depthAttachment;
+
+    VkAttachmentReference depthAttachmentRef;
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     VkSubpassDescription SubpassDescription;
     SubpassDescription.flags = 0;
@@ -440,7 +550,7 @@ int main(int argc, char** argv){
     SubpassDescription.colorAttachmentCount = 1;
     SubpassDescription.pColorAttachments = &attachReference;
     SubpassDescription.pResolveAttachments = NULL;
-    SubpassDescription.pDepthStencilAttachment = NULL;
+    SubpassDescription.pDepthStencilAttachment = &depthAttachmentRef;
     SubpassDescription.preserveAttachmentCount = 0;
     SubpassDescription.pPreserveAttachments = NULL;
 
@@ -448,17 +558,17 @@ int main(int argc, char** argv){
     SubpassDependency.dependencyFlags = 0;
     SubpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     SubpassDependency.dstSubpass = 0;
-    SubpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    SubpassDependency.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    SubpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    SubpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     SubpassDependency.srcAccessMask = 0;
-    SubpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    SubpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
     VkRenderPassCreateInfo renderPassInfo;
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     renderPassInfo.pNext = NULL;
     renderPassInfo.flags = 0;
-    renderPassInfo.attachmentCount = 1;
-    renderPassInfo.pAttachments = &attachDescription;
+    renderPassInfo.attachmentCount = 2;
+    renderPassInfo.pAttachments = attachDescriptions;
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &SubpassDescription;
     renderPassInfo.dependencyCount = 1;
@@ -543,17 +653,37 @@ int main(int argc, char** argv){
     shaderStageInfos[1] = fragShaderStageInfo;
 
     float verticies[] = {
-        0.0, -0.5,
-	    0.5, 0.5,
-	    -0.5,0.5
+        0.0, -0.5, 0.0,
+	    -0.5, 0.5, -0.5,
+        0.5, 0.5, -0.5,
+
+        0.0, -0.5, 0.0,
+        0.5, 0.5, 0.5,
+	    -0.5, 0.5, 0.5,
+        
+        0.0, -0.5, 0.0,
+        0.5, 0.5, -0.5,
+        0.5, 0.5, 0.5,
+
+        0.0, -0.5, 0.0,
+        -0.5, 0.5, 0.5,
+        -0.5, 0.5, -0.5,
+
+        0.5, 0.5, 0.5,
+        -0.5, 0.5, -0.5,
+        -0.5, 0.5, 0.5,
+
+        0.5, 0.5, -0.5,
+        -0.5, 0.5, -0.5,
+        0.5, 0.5, 0.5,
     };
-    uint32_t vertexCount = 3;
+    uint32_t vertexCount = 6 * 3;
 
     VkBufferCreateInfo vertexBufferInfo;
     vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     vertexBufferInfo.pNext = NULL;
     vertexBufferInfo.flags = 0;
-    vertexBufferInfo.size = sizeof(verticies[0]) * 2 * vertexCount;
+    vertexBufferInfo.size = sizeof(float) * 3 * vertexCount;
     vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     vertexBufferInfo.queueFamilyIndexCount = 0;
@@ -592,12 +722,12 @@ int main(int argc, char** argv){
     VkVertexInputBindingDescription vertexBufferDescription;
     vertexBufferDescription.binding = 0;
     vertexBufferDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    vertexBufferDescription.stride = sizeof(float) * 2;
+    vertexBufferDescription.stride = sizeof(float) * 3;
 
     VkVertexInputAttributeDescription vertexAttributeDescription;
     vertexAttributeDescription.binding = 0;
     vertexAttributeDescription.location = 0;
-    vertexAttributeDescription.format = VK_FORMAT_R32G32_SFLOAT;
+    vertexAttributeDescription.format = VK_FORMAT_R32G32B32_SFLOAT;
     vertexAttributeDescription.offset = 0;
 
     VkDescriptorSetLayoutBinding uboLayoutBinding;
@@ -611,14 +741,21 @@ int main(int argc, char** argv){
     VkDeviceMemory uniformBufferMemory;
     void* uniformBufferMapped;
     struct {
-        struct mat4 rotation;
+        struct mat4 model;
+        struct mat4 transform;
+        struct mat4 perspective;
     } UniformBufferObject;
-    mat4_identity(&UniformBufferObject.rotation.m11);
-
-    VkDeviceSize bufferSize = sizeof(float) * 4 * 4;
+    mat4_identity(&UniformBufferObject.perspective.m11);
+    mat4_perspective(&UniformBufferObject.perspective.m11, DEG_TO_RAD(90.f), (float)width / (float)height, 0.01f, 4.0f);
+    mat4_identity(&UniformBufferObject.model.m11);
+    mat4_identity(&UniformBufferObject.transform.m11);
+    UniformBufferObject.transform.m14 = 0.0f;
+    UniformBufferObject.transform.m24 = 0.0f;
+    UniformBufferObject.transform.m34 = -2.0f;
+    VkDeviceSize bufferSize = sizeof(float) * 4 * 4 * 3;
     createBuffer(device, *physDevice, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &uniformBuffer, &uniformBufferMemory);
     vkMapMemory(device, uniformBufferMemory, 0, bufferSize, 0, &uniformBufferMapped);
-    memcpy(uniformBufferMapped, &UniformBufferObject, sizeof(float) * 4 * 4);
+    memcpy(uniformBufferMapped, &UniformBufferObject, bufferSize);
     
     VkDescriptorSetLayoutCreateInfo layoutInfo;
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -700,12 +837,12 @@ int main(int argc, char** argv){
     rasterInfo.depthClampEnable = VK_TRUE;
     rasterInfo.rasterizerDiscardEnable = VK_FALSE;
     rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterInfo.cullMode = VK_CULL_MODE_NONE;
+    rasterInfo.cullMode = VK_CULL_MODE_BACK_BIT;
     rasterInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rasterInfo.depthBiasEnable = VK_FALSE;
     rasterInfo.depthBiasConstantFactor = 0.0f;
     rasterInfo.depthBiasClamp = 0.0f;
-    rasterInfo.lineWidth = 1.0f;
+    rasterInfo.lineWidth = 3.0f;
 
     VkPipelineMultisampleStateCreateInfo pipelineMultisample;
     pipelineMultisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -759,6 +896,29 @@ int main(int argc, char** argv){
     VkPipelineLayout pipelineLayout;
     vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &pipelineLayout);
 
+    VkStencilOpState stencilOpState;
+    stencilOpState.failOp = VK_STENCIL_OP_ZERO;
+    stencilOpState.passOp = VK_STENCIL_OP_ZERO;
+    stencilOpState.depthFailOp = VK_STENCIL_OP_ZERO;
+    stencilOpState.compareOp = VK_STENCIL_OP_ZERO;
+    stencilOpState.compareMask = 0;
+    stencilOpState.writeMask = 0;
+    stencilOpState.reference = 0;
+
+    VkPipelineDepthStencilStateCreateInfo depthInfo;
+    depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthInfo.pNext = NULL;
+    depthInfo.flags = 0;
+    depthInfo.depthTestEnable = VK_TRUE;
+    depthInfo.depthWriteEnable = VK_TRUE;
+    depthInfo.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthInfo.depthBoundsTestEnable = VK_FALSE;
+    depthInfo.minDepthBounds = 0.0f;
+    depthInfo.maxDepthBounds = 1.0f;
+    depthInfo.stencilTestEnable = VK_FALSE;
+    depthInfo.front = stencilOpState;
+    depthInfo.back = stencilOpState;
+
     /****Creating Pipeline****/
 
     VkGraphicsPipelineCreateInfo pipelineInfo;
@@ -773,7 +933,7 @@ int main(int argc, char** argv){
     pipelineInfo.pViewportState = &pipelineViewportInfo;
     pipelineInfo.pRasterizationState = &rasterInfo;
     pipelineInfo.pMultisampleState = &pipelineMultisample;
-    pipelineInfo.pDepthStencilState = NULL;
+    pipelineInfo.pDepthStencilState = &depthInfo;
     pipelineInfo.pColorBlendState = &colorBlendInfo;
     pipelineInfo.pDynamicState = NULL;
     pipelineInfo.layout = pipelineLayout;
@@ -791,15 +951,16 @@ int main(int argc, char** argv){
     VkFramebufferCreateInfo framebufferInfo[swapImageCount];
     VkFramebuffer framebuffers[swapImageCount];
 
-    VkImageView imageAttachs[swapImageCount];
+    VkImageView imageAttachs[swapImageCount][2];
     for(uint32_t i = 0; i < swapImageCount; i++){
-        imageAttachs[i] = imageViews[i];
+        imageAttachs[i][0] = imageViews[i];
+        imageAttachs[i][1] = depthImageViews[i];
         framebufferInfo[i].sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo[i].pNext = NULL;
         framebufferInfo[i].flags = 0;
         framebufferInfo[i].renderPass = renderPass;
-        framebufferInfo[i].attachmentCount = 1;
-        framebufferInfo[i].pAttachments = &(imageAttachs[i]);
+        framebufferInfo[i].attachmentCount = 2;
+        framebufferInfo[i].pAttachments = imageAttachs[i];
         framebufferInfo[i].width = swapchainInfo.imageExtent.width;
         framebufferInfo[i].height = swapchainInfo.imageExtent.height;
         framebufferInfo[i].layers = 1;
@@ -839,8 +1000,9 @@ int main(int argc, char** argv){
     renderArea.offset.x = 0;
     renderArea.offset.y = 0;
     renderArea.extent = swapchainInfo.imageExtent;
-    VkClearValue clearValue = {0.2f, 0.3f, 0.5f, 0.0f};
-
+    VkClearValue clearValues[2];
+    clearValues[0].color = (VkClearColorValue){0.0f, 0.0f, 1.0f, 0.0f};
+    clearValues[1].depthStencil = (VkClearDepthStencilValue){1.0f, 0};
 
     for(uint32_t i = 0; i < swapImageCount; i++){
         cmdBufferBeginInfos[i].sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -853,8 +1015,8 @@ int main(int argc, char** argv){
         renderPassBeginInfos[i].renderPass = renderPass;
         renderPassBeginInfos[i].renderArea = renderArea;
         renderPassBeginInfos[i].framebuffer = framebuffers[i];
-        renderPassBeginInfos[i].clearValueCount = 1;
-        renderPassBeginInfos[i].pClearValues = &clearValue;
+        renderPassBeginInfos[i].clearValueCount = 2;
+        renderPassBeginInfos[i].pClearValues = clearValues;
         
         vkBeginCommandBuffer(cmdBuffers[i], &cmdBufferBeginInfos[i]);
         vkCmdBeginRenderPass(cmdBuffers[i], &renderPassBeginInfos[i], VK_SUBPASS_CONTENTS_INLINE);
@@ -866,7 +1028,7 @@ int main(int argc, char** argv){
         
         vkCmdBindDescriptorSets(cmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
 
-        vkCmdDraw(cmdBuffers[i], 3, 1, 0, 0);
+        vkCmdDraw(cmdBuffers[i], vertexCount, 1, 0, 0);
 
         vkCmdEndRenderPass(cmdBuffers[i]);
 
@@ -936,7 +1098,9 @@ int main(int argc, char** argv){
     float time = DEG_TO_RAD(-360);
     clock_t prevTime;
     prevTime = clock();
-    int framesToShowFps = 1300;
+    int framesToShowFps = 1000;
+    float maxFPS;
+    uint8_t renderMode = 1;
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
@@ -972,9 +1136,8 @@ int main(int argc, char** argv){
         presentInfo.pImageIndices = &imgIndex;
         
         vkQueuePresentKHR(qPress, &presentInfo);
-
-        mat4_rotation_y(&UniformBufferObject.rotation.m11, time);
-        memcpy(uniformBufferMapped, &UniformBufferObject, sizeof(float) * 4 * 4);
+        mat4_rotation_axis(&UniformBufferObject.model.m11, &(struct vec3){0.2f, 0.4f, -0.1f}.x, time * 0.15f);
+        memcpy(uniformBufferMapped, &UniformBufferObject, bufferSize);
         
         frame = (frame + 1) % maxFrames;
         time = time + 0.005;
@@ -982,9 +1145,12 @@ int main(int argc, char** argv){
         if(fpsCounter > framesToShowFps){
             float fps;
             clock_t newTime = clock();
-            fps = framesToShowFps / (((float)(newTime) - prevTime) / CLOCKS_PER_SEC);
-            printf("\r              ");
-            printf("\rfps: %f", fps);
+            fps = framesToShowFps / (((newTime) - prevTime) / (float)CLOCKS_PER_SEC);
+            if(fps > maxFPS){
+                maxFPS = fps;
+            }
+            printf("\r                    ");
+            printf("\rfps: %f max fps: %f", fps, maxFPS);
             prevTime = newTime;
             fpsCounter = 0;
         }
